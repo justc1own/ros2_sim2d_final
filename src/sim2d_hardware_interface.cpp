@@ -23,46 +23,46 @@ hardware_interface::CallbackReturn Sim2DHardwareInterface::on_init(
 
   RCLCPP_INFO(rclcpp::get_logger("Sim2DHardwareInterface"), "Configuring...");
 
-  // Parse parameters for the kinematic solver
+  // Parse parameters for the kinematic solver from <hardware> tag
   try {
-    solver_params_.base_frame_id = info_.hardware_parameters.at("base_frame_id");
-    solver_params_.icr_x_position = std::stod(info_.hardware_parameters.at("icr_x_position"));
-    solver_params_.icr_y_position = std::stod(info_.hardware_parameters.at("icr_y_position"));
-    solver_params_.min_icr_distance = std::stod(info_.hardware_parameters.at("min_icr_distance"));
-    solver_params_.weight_translation = std::stod(info_.hardware_parameters.at("weight_translation"));
-    solver_params_.weight_rotation = std::stod(info_.hardware_parameters.at("weight_rotation"));
+    solver_params_.x_icr = std::stod(info_.hardware_parameters.at("x_icr"));
+    RCLCPP_INFO(rclcpp::get_logger("Sim2DHardwareInterface"), "x_icr: %f", solver_params_.x_icr);
   } catch (const std::out_of_range & ex) {
-    RCLCPP_FATAL(rclcpp::get_logger("Sim2DHardwareInterface"), "Parameter not found: %s", ex.what());
+    RCLCPP_FATAL(rclcpp::get_logger("Sim2DHardwareInterface"), "Required parameter not found: %s", ex.what());
     return hardware_interface::CallbackReturn::ERROR;
   } catch (const std::invalid_argument & ex) {
     RCLCPP_FATAL(rclcpp::get_logger("Sim2DHardwareInterface"), "Invalid argument for parameter: %s", ex.what());
     return hardware_interface::CallbackReturn::ERROR;
   }
 
-  RCLCPP_INFO(rclcpp::get_logger("Sim2DHardwareInterface"), "Parsing wheels...");
+  RCLCPP_INFO(rclcpp::get_logger("Sim2DHardwareInterface"), "Parsing joints...");
 
   for (const auto & joint : info_.joints) {
-    if (joint.parameters.count("wheel_name")) {
-        KinematicSolver::Wheel wheel;
-        try {
-            wheel.name = joint.parameters.at("wheel_name");
-            wheel.x = std::stod(joint.parameters.at("x"));
-            wheel.y = std::stod(joint.parameters.at("y"));
-            wheel.radius = std::stod(joint.parameters.at("radius"));
-            wheel.alpha = std::stod(joint.parameters.at("alpha"));
-            wheel.beta_1 = std::stod(joint.parameters.at("beta_1"));
-            wheel.beta_2 = std::stod(joint.parameters.at("beta_2"));
-            wheel.delta = std::stod(joint.parameters.at("delta"));
-            solver_params_.wheels.push_back(wheel);
-            RCLCPP_INFO(rclcpp::get_logger("Sim2DHardwareInterface"), "Added wheel: %s", wheel.name.c_str());
-        } catch (const std::out_of_range & ex) {
-            RCLCPP_FATAL(rclcpp::get_logger("Sim2DHardwareInterface"), "Wheel parameter not found: %s", ex.what());
-            return hardware_interface::CallbackReturn::ERROR;
-        } catch (const std::invalid_argument & ex) {
-            RCLCPP_FATAL(rclcpp::get_logger("Sim2DHardwareInterface"), "Invalid argument for wheel parameter: %s", ex.what());
-            return hardware_interface::CallbackReturn::ERROR;
-        }
-    }
+      KinematicSolver::Wheel wheel;
+      try {
+          // These parameters are mandatory for every wheel joint
+          wheel.name = joint.name;
+          wheel.x = std::stod(joint.parameters.at("x"));
+          wheel.y = std::stod(joint.parameters.at("y"));
+          wheel.radius = std::stod(joint.parameters.at("radius"));
+          wheel.mount_angle = std::stod(joint.parameters.at("mount_angle"));
+          wheel.steerable = (joint.parameters.at("steerable") == "true");
+          wheel.zero_command_behavior = joint.parameters.at("zero_command_behavior");
+          wheel.alpha = std::stod(joint.parameters.at("alpha"));
+          wheel.beta_1 = std::stod(joint.parameters.at("beta1"));
+          wheel.beta_2 = std::stod(joint.parameters.at("beta2"));
+          
+          solver_params_.wheels.push_back(wheel);
+          RCLCPP_INFO(rclcpp::get_logger("Sim2DHardwareInterface"), "Added wheel '%s' at (%f, %f)", 
+            wheel.name.c_str(), wheel.x, wheel.y);
+
+      } catch (const std::out_of_range & ex) {
+          RCLCPP_FATAL(rclcpp::get_logger("Sim2DHardwareInterface"), "Joint '%s' missing parameter: %s", joint.name.c_str(), ex.what());
+          return hardware_interface::CallbackReturn::ERROR;
+      } catch (const std::invalid_argument & ex) {
+          RCLCPP_FATAL(rclcpp::get_logger("Sim2DHardwareInterface"), "Joint '%s' has invalid argument: %s", joint.name.c_str(), ex.what());
+          return hardware_interface::CallbackReturn::ERROR;
+      }
   }
 
   if (solver_params_.wheels.empty()) {
@@ -71,9 +71,11 @@ hardware_interface::CallbackReturn Sim2DHardwareInterface::on_init(
   }
 
   // Create a ROS 2 node for publishers
-  node_ = std::make_shared<rclcpp::Node>("sim2d_hardware_interface_publishers");
-  odom_publisher_ = node_->create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
-  tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(node_);
+  // We use a temporary node to get the logger and parameters
+  auto node = std::make_shared<rclcpp::Node>("sim2d_hardware_interface_node");
+  odom_publisher_ = node->create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
+  tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(node);
+  node_ = node; // Store the node
 
   hw_states_positions_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
   hw_states_velocities_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());

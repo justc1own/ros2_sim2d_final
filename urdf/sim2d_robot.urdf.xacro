@@ -1,0 +1,115 @@
+<?xml version="1.0"?>
+<robot name="sim2d_robot" xmlns:xacro="http://ros.org/wiki/xacro">
+
+    <!-- === BASE ROBOT PARAMETERS === -->
+    <xacro:property name="base_length" value="0.8"/>
+    <xacro:property name="base_width"  value="0.5"/>
+    <xacro:property name="wheel_radius" value="0.15"/>
+    <!-- X_icr: Instantaneous Center of Rotation offset. 
+         0.0 for pure DifferentialDrive, > 0 for Skid-Steer -->
+    <xacro:property name="x_icr" value="0.0"/>
+
+
+    <!-- === BASE LINK === -->
+    <link name="base_footprint"/>
+
+    <link name="base_link">
+        <visual>
+            <geometry>
+                <box size="${base_length} ${base_width} 0.2"/>
+            </geometry>
+            <material name="blue">
+                <color rgba="0.0 0.0 0.8 1.0"/>
+            </material>
+        </visual>
+    </link>
+
+    <joint name="base_joint" type="fixed">
+        <parent link="base_footprint"/>
+        <child link="base_link"/>
+        <origin xyz="0 0 ${wheel_radius}" rpy="0 0 0"/>
+    </joint>
+
+
+    <!-- === WHEEL MACRO === -->
+    <!-- Creates the visual and collision parts of a wheel -->
+    <xacro:macro name="sim2d_wheel" params="prefix x y">
+        <link name="${prefix}_wheel_link">
+            <visual>
+                <geometry>
+                    <cylinder radius="${wheel_radius}" length="0.05"/>
+                </geometry>
+                <material name="black">
+                    <color rgba="0.1 0.1 0.1 1.0"/>
+                </material>
+            </visual>
+        </link>
+
+        <joint name="${prefix}_wheel_joint" type="continuous">
+            <parent link="base_link"/>
+            <child link="${prefix}_wheel_link"/>
+            <origin xyz="${x} ${y} 0.0" rpy="-1.57079632679 0 0"/>
+            <axis xyz="0 0 1"/>
+        </joint>
+    </xacro:macro>
+
+    <!-- Spawn 4 wheels (Rear are driving, Front are castors) -->
+    <xacro:sim2d_wheel prefix="rear_left"   x="-0.3" y=" 0.3"/>
+    <xacro:sim2d_wheel prefix="rear_right"  x="-0.3" y="-0.3"/>
+    <xacro:sim2d_wheel prefix="front_left"  x=" 0.3" y=" 0.3"/>
+    <xacro:sim2d_wheel prefix="front_right" x=" 0.3" y="-0.3"/>
+
+
+    <!-- === ROS2 CONTROL CONFIGURATION FOR THE SIMULATOR === -->
+    <ros2_control name="Sim2DSystem" type="system">
+        <hardware>
+            <!-- Our plugin -->
+            <plugin>sim2d_hardware_interface/Sim2DHardwareInterface</plugin>
+            <!-- Global simulator parameters -->
+            <param name="x_icr">${x_icr}</param>
+        </hardware>
+
+        <!-- Macro to register a wheel joint with the plugin -->
+        <xacro:macro name="sim2d_control_joint" params="prefix x y drive behavior alpha beta1 beta2">
+            <joint name="${prefix}_wheel_joint">
+                
+                <!-- If the wheel is driven, declare a velocity command interface -->
+                <xacro:if value="${drive}">
+                    <command_interface name="velocity"/>
+                </xacro:if>
+
+                <!-- State interfaces for all wheels (for visualization) -->
+                <state_interface name="position"/>
+                <state_interface name="velocity"/>
+                
+                <!-- === WHEEL KINEMATICS (read by on_init) === -->
+                <param name="x">${x}</param>
+                <param name="y">${y}</param>
+                <param name="radius">${wheel_radius}</param>
+                <param name="mount_angle">0.0</param> 
+                <param name="steerable">false</param> 
+                <param name="zero_command_behavior">${behavior}</param>
+                
+                <!-- Slip coefficients -->
+                <param name="alpha">${alpha}</param>
+                <param name="beta1">${beta1}</param>
+                <param name="beta2">${beta2}</param>
+            </joint>
+        </xacro:macro>
+
+        <!-- Register REAR DRIVING wheels -->
+        <!-- behavior="locked" - wheel brakes when command is zero (Case A from pipeline) -->
+        <!-- alpha="0.95", slight longitudinal slip -->
+        <xacro:sim2d_control_joint prefix="rear_left"   x="-0.3" y="0.3" drive="true" behavior="locked" alpha="0.95" beta1="0.05" beta2="0.1"/>
+        <xacro:sim2d_control_joint prefix="rear_right"  x="-0.3" y="-0.3" drive="true" behavior="locked" alpha="0.95" beta1="0.05" beta2="0.1"/>
+
+        <!-- Register FRONT CASTOR wheels (passive) -->
+        <!-- drive="false" - no command interface, not controlled -->
+        <!-- behavior="free" - rolls freely, provides only lateral constraint (Case B) -->
+        <!-- alpha="1.0" - no longitudinal slip as there is no drive -->
+        <xacro:sim2d_control_joint prefix="front_left"  x="0.3" y="0.3" drive="false" behavior="free" alpha="1.0" beta1="0.0" beta2="0.0"/>
+        <xacro:sim2d_control_joint prefix="front_right" x="0.3" y="-0.3" drive="false" behavior="free" alpha="1.0" beta1="0.0" beta2="0.0"/>
+
+    </ros2_control>
+
+</robot>
