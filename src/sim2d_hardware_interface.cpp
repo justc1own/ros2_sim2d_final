@@ -6,13 +6,13 @@ namespace sim2d_hardware_interface
 {
 
 hardware_interface::CallbackReturn Sim2DHardwareInterface::on_init(
-  const hardware_interface::HardwareInfo & info)
+  const hardware_interface::HardwareComponentInterfaceParams & params)
 {
-  if (hardware_interface::SystemInterface::on_init(info) != hardware_interface::CallbackReturn::SUCCESS) {
+  if (hardware_interface::SystemInterface::on_init(params) != hardware_interface::CallbackReturn::SUCCESS) {
     return hardware_interface::CallbackReturn::ERROR;
   }
 
-  const size_t joint_count = info.joints.size();
+  const size_t joint_count = params.hardware_info.joints.size();
   hw_positions_.assign(joint_count, 0.0);
   hw_velocities_.assign(joint_count, 0.0);
   hw_commands_.assign(joint_count, 0.0);

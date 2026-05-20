@@ -6,6 +6,7 @@
 #include <hardware_interface/handle.hpp>
 #include <hardware_interface/hardware_info.hpp>
 #include <hardware_interface/component_parser.hpp>
+#include <hardware_interface/types/hardware_component_interface_params.hpp>
 #include <rclcpp_lifecycle/state.hpp>
 #include <vector>
 
@@ -15,7 +16,8 @@ namespace sim2d_hardware_interface
 class Sim2DHardwareInterface : public hardware_interface::SystemInterface
 {
 public:
-  hardware_interface::CallbackReturn on_init(const hardware_interface::HardwareInfo & info) override;
+  hardware_interface::CallbackReturn on_init(
+    const hardware_interface::HardwareComponentInterfaceParams & params) override;
   std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
   std::vector<hardware_interface::CommandInterface> export_command_interfaces() override;
   hardware_interface::CallbackReturn on_activate(const rclcpp_lifecycle::State & previous_state) override;
