@@ -1,31 +1,98 @@
 #include "sim2d_hardware_interface/sim2d_hardware_interface.hpp"
-#include <hardware_interface/types/hardware_interface_return_values.hpp>
-#include <pluginlib/class_list_macros.hpp>
+
+#include <vector>
+#include <string>
+
+#include "hardware_interface/types/hardware_interface_type_values.hpp"
+#include "rclcpp/logging.hpp"
+#include "pluginlib/class_list_macros.hpp"
+#include "tf2/LinearMath/Quaternion.h"
+#include "geometry_msgs/msg/transform_stamped.hpp"
 
 namespace sim2d_hardware_interface
 {
 
 hardware_interface::CallbackReturn Sim2DHardwareInterface::on_init(
-  const hardware_interface::HardwareComponentInterfaceParams & params)
+  const hardware_interface::HardwareInfo & info)
 {
-  if (hardware_interface::SystemInterface::on_init(params) != hardware_interface::CallbackReturn::SUCCESS) {
+  if (hardware_interface::SystemInterface::on_init(info) !=
+      hardware_interface::CallbackReturn::SUCCESS)
+  {
     return hardware_interface::CallbackReturn::ERROR;
   }
 
-  const size_t joint_count = params.hardware_info.joints.size();
-  hw_positions_.assign(joint_count, 0.0);
-  hw_velocities_.assign(joint_count, 0.0);
-  hw_commands_.assign(joint_count, 0.0);
+  RCLCPP_INFO(rclcpp::get_logger("Sim2DHardwareInterface"), "Configuring...");
 
+  // Parse parameters for the kinematic solver
+  try {
+    solver_params_.base_frame_id = info_.hardware_parameters.at("base_frame_id");
+    solver_params_.icr_x_position = std::stod(info_.hardware_parameters.at("icr_x_position"));
+    solver_params_.icr_y_position = std::stod(info_.hardware_parameters.at("icr_y_position"));
+    solver_params_.min_icr_distance = std::stod(info_.hardware_parameters.at("min_icr_distance"));
+    solver_params_.weight_translation = std::stod(info_.hardware_parameters.at("weight_translation"));
+    solver_params_.weight_rotation = std::stod(info_.hardware_parameters.at("weight_rotation"));
+  } catch (const std::out_of_range & ex) {
+    RCLCPP_FATAL(rclcpp::get_logger("Sim2DHardwareInterface"), "Parameter not found: %s", ex.what());
+    return hardware_interface::CallbackReturn::ERROR;
+  } catch (const std::invalid_argument & ex) {
+    RCLCPP_FATAL(rclcpp::get_logger("Sim2DHardwareInterface"), "Invalid argument for parameter: %s", ex.what());
+    return hardware_interface::CallbackReturn::ERROR;
+  }
+
+  RCLCPP_INFO(rclcpp::get_logger("Sim2DHardwareInterface"), "Parsing wheels...");
+
+  for (const auto & joint : info_.joints) {
+    if (joint.parameters.count("wheel_name")) {
+        KinematicSolver::Wheel wheel;
+        try {
+            wheel.name = joint.parameters.at("wheel_name");
+            wheel.x = std::stod(joint.parameters.at("x"));
+            wheel.y = std::stod(joint.parameters.at("y"));
+            wheel.radius = std::stod(joint.parameters.at("radius"));
+            wheel.alpha = std::stod(joint.parameters.at("alpha"));
+            wheel.beta_1 = std::stod(joint.parameters.at("beta_1"));
+            wheel.beta_2 = std::stod(joint.parameters.at("beta_2"));
+            wheel.delta = std::stod(joint.parameters.at("delta"));
+            solver_params_.wheels.push_back(wheel);
+            RCLCPP_INFO(rclcpp::get_logger("Sim2DHardwareInterface"), "Added wheel: %s", wheel.name.c_str());
+        } catch (const std::out_of_range & ex) {
+            RCLCPP_FATAL(rclcpp::get_logger("Sim2DHardwareInterface"), "Wheel parameter not found: %s", ex.what());
+            return hardware_interface::CallbackReturn::ERROR;
+        } catch (const std::invalid_argument & ex) {
+            RCLCPP_FATAL(rclcpp::get_logger("Sim2DHardwareInterface"), "Invalid argument for wheel parameter: %s", ex.what());
+            return hardware_interface::CallbackReturn::ERROR;
+        }
+    }
+  }
+
+  if (solver_params_.wheels.empty()) {
+      RCLCPP_FATAL(rclcpp::get_logger("Sim2DHardwareInterface"), "No wheels configured. Make sure to add wheel parameters to your URDF joints.");
+      return hardware_interface::CallbackReturn::ERROR;
+  }
+
+  // Create a ROS 2 node for publishers
+  node_ = std::make_shared<rclcpp::Node>("sim2d_hardware_interface_publishers");
+  odom_publisher_ = node_->create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
+  tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(node_);
+
+  hw_states_positions_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
+  hw_states_velocities_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
+  hw_commands_positions_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
+  hw_commands_velocities_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
+
+  RCLCPP_INFO(rclcpp::get_logger("Sim2DHardwareInterface"), "Initialization successful.");
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
 std::vector<hardware_interface::StateInterface> Sim2DHardwareInterface::export_state_interfaces()
 {
   std::vector<hardware_interface::StateInterface> state_interfaces;
-  for (size_t i = 0; i < info_.joints.size(); ++i) {
-    state_interfaces.emplace_back(info_.joints[i].name, "position", &hw_positions_[i]);
-    state_interfaces.emplace_back(info_.joints[i].name, "velocity", &hw_velocities_[i]);
+  for (size_t i = 0; i < info_.joints.size(); i++)
+  {
+    state_interfaces.emplace_back(hardware_interface::StateInterface(
+      info_.joints[i].name, hardware_interface::HW_IF_POSITION, &hw_states_positions_[i]));
+    state_interfaces.emplace_back(hardware_interface::StateInterface(
+      info_.joints[i].name, hardware_interface::HW_IF_VELOCITY, &hw_states_velocities_[i]));
   }
   return state_interfaces;
 }
@@ -33,33 +100,144 @@ std::vector<hardware_interface::StateInterface> Sim2DHardwareInterface::export_s
 std::vector<hardware_interface::CommandInterface> Sim2DHardwareInterface::export_command_interfaces()
 {
   std::vector<hardware_interface::CommandInterface> command_interfaces;
-  for (size_t i = 0; i < info_.joints.size(); ++i) {
-    command_interfaces.emplace_back(info_.joints[i].name, "velocity", &hw_commands_[i]);
+  for (size_t i = 0; i < info_.joints.size(); i++)
+  {
+    // Check if the joint is for steering (position) or driving (velocity)
+    if (info_.joints[i].command_interfaces[0].name == hardware_interface::HW_IF_POSITION)
+    {
+        command_interfaces.emplace_back(hardware_interface::CommandInterface(
+            info_.joints[i].name, hardware_interface::HW_IF_POSITION, &hw_commands_positions_[i]));
+    }
+    else // Assuming velocity otherwise
+    {
+        command_interfaces.emplace_back(hardware_interface::CommandInterface(
+            info_.joints[i].name, hardware_interface::HW_IF_VELOCITY, &hw_commands_velocities_[i]));
+    }
   }
   return command_interfaces;
 }
 
 hardware_interface::CallbackReturn Sim2DHardwareInterface::on_activate(
-  const rclcpp_lifecycle::State &)
+  const rclcpp_lifecycle::State & /*previous_state*/)
 {
+  // Reset commands and states
+  for (size_t i = 0; i < info_.joints.size(); i++)
+  {
+    hw_states_positions_[i] = 0.0;
+    hw_states_velocities_[i] = 0.0;
+    hw_commands_positions_[i] = 0.0;
+    hw_commands_velocities_[i] = 0.0;
+  }
+
+  // Initialize the KinematicSolver with parameters from URDF
+  solver_ = std::make_unique<KinematicSolver>(solver_params_);
+
+  RCLCPP_INFO(rclcpp::get_logger("Sim2DHardwareInterface"), "Activation successful.");
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
 hardware_interface::CallbackReturn Sim2DHardwareInterface::on_deactivate(
-  const rclcpp_lifecycle::State &)
+  const rclcpp_lifecycle::State & /*previous_state*/)
 {
+  RCLCPP_INFO(rclcpp::get_logger("Sim2DHardwareInterface"), "Deactivation successful.");
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
 hardware_interface::return_type Sim2DHardwareInterface::read(
-  const rclcpp::Time &, const rclcpp::Duration &)
+  const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
 {
+  // In our simulation, the "reading" is just updating the state based on the last command.
+  // The main logic is in write(), where we calculate the new state.
+  // Here, we just reflect the latest calculated state for ros2_control.
+  for (size_t i = 0; i < info_.joints.size(); i++)
+  {
+      // The velocity state is assumed to be the same as the command for simplicity
+      // in the context of a simulator where state follows command instantly.
+      hw_states_velocities_[i] = hw_commands_velocities_[i];
+  }
+
   return hardware_interface::return_type::OK;
 }
 
 hardware_interface::return_type Sim2DHardwareInterface::write(
-  const rclcpp::Time &, const rclcpp::Duration &)
+  const rclcpp::Time & time, const rclcpp::Duration & period)
 {
+  if (!solver_)
+  {
+    return hardware_interface::return_type::OK; // Solver not initialized yet
+  }
+
+  // Collect wheel speeds and steering angles from the hardware commands
+  std::vector<double> wheel_speeds;
+  std::vector<double> steering_angles;
+  for (size_t i = 0; i < info_.joints.size(); ++i) {
+      if (info_.joints[i].command_interfaces[0].name == hardware_interface::HW_IF_VELOCITY) {
+          wheel_speeds.push_back(hw_commands_velocities_[i]);
+      } else if (info_.joints[i].command_interfaces[0].name == hardware_interface::HW_IF_POSITION) {
+          steering_angles.push_back(hw_commands_positions_[i]);
+      }
+  }
+
+  // Get chassis velocity from the kinematic solver
+  auto chassis_velocity = solver_->solve(wheel_speeds, steering_angles);
+  double vx = chassis_velocity.vx;
+  double vy = chassis_velocity.vy;
+  double omega = chassis_velocity.omega;
+
+  // Integrate the robot's pose
+  double dt = period.seconds();
+  double delta_x = (vx * cos(theta_) - vy * sin(theta_)) * dt;
+  double delta_y = (vx * sin(theta_) + vy * cos(theta_)) * dt;
+  double delta_theta = omega * dt;
+
+  x_ += delta_x;
+  y_ += delta_y;
+  theta_ += delta_theta;
+
+  // Update joint positions for visualization in RViz
+  for (size_t i = 0; i < info_.joints.size(); ++i) {
+      if (info_.joints[i].command_interfaces[0].name == hardware_interface::HW_IF_VELOCITY) {
+          // For driving wheels, integrate position from velocity
+          hw_states_positions_[i] += hw_commands_velocities_[i] * dt;
+      } else if (info_.joints[i].command_interfaces[0].name == hardware_interface::HW_IF_POSITION) {
+          // For steering wheels, position state is the same as the command
+          hw_states_positions_[i] = hw_commands_positions_[i];
+      }
+  }
+
+  // Publish odometry and TF
+  rclcpp::Time now = time;
+  tf2::Quaternion q;
+  q.setRPY(0, 0, theta_);
+
+  // TF
+  geometry_msgs::msg::TransformStamped transform;
+  transform.header.stamp = now;
+  transform.header.frame_id = "odom";
+  transform.child_frame_id = solver_params_.base_frame_id;
+  transform.transform.translation.x = x_;
+  transform.transform.translation.y = y_;
+  transform.transform.translation.z = 0.0;
+  transform.transform.rotation.x = q.x();
+  transform.transform.rotation.y = q.y();
+  transform.transform.rotation.z = q.z();
+  transform.transform.rotation.w = q.w();
+  tf_broadcaster_->sendTransform(transform);
+
+  // Odometry
+  nav_msgs::msg::Odometry odom_msg;
+  odom_msg.header.stamp = now;
+  odom_msg.header.frame_id = "odom";
+  odom_msg.child_frame_id = solver_params_.base_frame_id;
+  odom_msg.pose.pose.position.x = x_;
+  odom_msg.pose.pose.position.y = y_;
+  odom_msg.pose.pose.position.z = 0.0;
+  odom_msg.pose.pose.orientation = transform.transform.rotation;
+  odom_msg.twist.twist.linear.x = vx;
+  odom_msg.twist.twist.linear.y = vy;
+  odom_msg.twist.twist.angular.z = omega;
+  odom_publisher_->publish(odom_msg);
+
   return hardware_interface::return_type::OK;
 }
 
