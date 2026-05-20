@@ -1,0 +1,7 @@
+<library path="lib/libsim2d_hardware_interface">
+  <class name="sim2d_hardware_interface::Sim2DHardwareInterface"
+         type="sim2d_hardware_interface::Sim2DHardwareInterface"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>2D simulator hardware interface plugin for ros2_control.</description>
+  </class>
+</library>
