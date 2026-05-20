@@ -69,10 +69,25 @@ def generate_launch_description():
         output='screen'
     )
 
+    # 6. Foxglove Bridge
+    # Opens a websocket for Foxglove Studio to connect to
+    foxglove_bridge_node = Node(
+        package='foxglove_bridge',
+        executable='foxglove_bridge',
+        name='foxglove_bridge',
+        output='screen',
+        parameters=[{
+            'port': 8765,
+            'address': '0.0.0.0',
+            'send_buffer_limit': 10000000
+        }]
+    )
+
     return LaunchDescription([
         robot_state_publisher_node,
         controller_manager_node,
         joint_state_broadcaster_spawner,
         diff_drive_controller_spawner,
-        rviz_node
+        rviz_node,
+        foxglove_bridge_node
     ])

@@ -2,6 +2,8 @@ version: '3.8'
 services:
   sim2d-builder:
     build: .
+    ports:
+      - "8765:8765"
     volumes:
       - .:/home/dev/ws/src/sim2d_hardware_interface:cached
     working_dir: /home/dev/ws
