@@ -10,10 +10,10 @@
 #include "hardware_interface/hardware_info.hpp"
 #include "hardware_interface/types/hardware_interface_return_values.hpp"
 #include "rclcpp/macros.hpp"
-#include "rclcpp_lifecycle/node_interface.hpp"
+// #include "rclcpp_lifecycle/node_interface.hpp"
 #include "rclcpp_lifecycle/state.hpp"
 #include "rclcpp/rclcpp.hpp"
-#include "tf2_ros/transform_broadcaster.h"
+#include "tf2_ros/transform_broadcaster.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 
 #include "sim2d_hardware_interface/kinematics_solver.hpp"
@@ -56,7 +56,9 @@ private:
   std::unique_ptr<KinematicSolver> solver_;
 
   // Parameters for the kinematic solver
-  KinematicSolver::Params solver_params_;
+  std::vector<Wheel> wheels_;
+  double icr_offset_x_ = 0.0;
+  std::string base_frame_id_ = "base_link";
 
   // Robot's pose
   double x_ = 0.0;

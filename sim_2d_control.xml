@@ -1,4 +1,4 @@
-<library path="lib/libsim2d_hardware_interface">
+<library path="sim2d_hardware_interface">
   <class name="sim2d_hardware_interface::Sim2DHardwareInterface"
          type="sim2d_hardware_interface::Sim2DHardwareInterface"
          base_class_type="hardware_interface::SystemInterface">

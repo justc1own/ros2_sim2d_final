@@ -25,8 +25,8 @@ hardware_interface::CallbackReturn Sim2DHardwareInterface::on_init(
 
   // Parse parameters for the kinematic solver from <hardware> tag
   try {
-    solver_params_.x_icr = std::stod(info_.hardware_parameters.at("x_icr"));
-    RCLCPP_INFO(rclcpp::get_logger("Sim2DHardwareInterface"), "x_icr: %f", solver_params_.x_icr);
+    icr_offset_x_ = std::stod(info_.hardware_parameters.at("x_icr"));
+    RCLCPP_INFO(rclcpp::get_logger("Sim2DHardwareInterface"), "x_icr: %f", icr_offset_x_);
   } catch (const std::out_of_range & ex) {
     RCLCPP_FATAL(rclcpp::get_logger("Sim2DHardwareInterface"), "Required parameter not found: %s", ex.what());
     return hardware_interface::CallbackReturn::ERROR;
@@ -38,23 +38,23 @@ hardware_interface::CallbackReturn Sim2DHardwareInterface::on_init(
   RCLCPP_INFO(rclcpp::get_logger("Sim2DHardwareInterface"), "Parsing joints...");
 
   for (const auto & joint : info_.joints) {
-      KinematicSolver::Wheel wheel;
+      Wheel wheel;
       try {
           // These parameters are mandatory for every wheel joint
-          wheel.name = joint.name;
-          wheel.x = std::stod(joint.parameters.at("x"));
-          wheel.y = std::stod(joint.parameters.at("y"));
+          // wheel.name = joint.name;  // Wheel struct doesn't have name
+          wheel.position_x = std::stod(joint.parameters.at("x"));
+          wheel.position_y = std::stod(joint.parameters.at("y"));
           wheel.radius = std::stod(joint.parameters.at("radius"));
-          wheel.mount_angle = std::stod(joint.parameters.at("mount_angle"));
-          wheel.steerable = (joint.parameters.at("steerable") == "true");
-          wheel.zero_command_behavior = joint.parameters.at("zero_command_behavior");
-          wheel.alpha = std::stod(joint.parameters.at("alpha"));
-          wheel.beta_1 = std::stod(joint.parameters.at("beta1"));
-          wheel.beta_2 = std::stod(joint.parameters.at("beta2"));
+          wheel.mounting_angle = std::stod(joint.parameters.at("mount_angle"));
+          // wheel.steerable = (joint.parameters.at("steerable") == "true");
+          // wheel.zero_command_behavior = joint.parameters.at("zero_command_behavior");
+          wheel.alpha_slip = std::stod(joint.parameters.at("alpha"));
+          wheel.beta1_roc = std::stod(joint.parameters.at("beta1"));
+          wheel.beta2_roc = std::stod(joint.parameters.at("beta2"));
           
-          solver_params_.wheels.push_back(wheel);
+          wheels_.push_back(wheel);
           RCLCPP_INFO(rclcpp::get_logger("Sim2DHardwareInterface"), "Added wheel '%s' at (%f, %f)", 
-            wheel.name.c_str(), wheel.x, wheel.y);
+            joint.name.c_str(), wheel.position_x, wheel.position_y);
 
       } catch (const std::out_of_range & ex) {
           RCLCPP_FATAL(rclcpp::get_logger("Sim2DHardwareInterface"), "Joint '%s' missing parameter: %s", joint.name.c_str(), ex.what());
@@ -65,7 +65,7 @@ hardware_interface::CallbackReturn Sim2DHardwareInterface::on_init(
       }
   }
 
-  if (solver_params_.wheels.empty()) {
+  if (wheels_.empty()) {
       RCLCPP_FATAL(rclcpp::get_logger("Sim2DHardwareInterface"), "No wheels configured. Make sure to add wheel parameters to your URDF joints.");
       return hardware_interface::CallbackReturn::ERROR;
   }
@@ -132,7 +132,7 @@ hardware_interface::CallbackReturn Sim2DHardwareInterface::on_activate(
   }
 
   // Initialize the KinematicSolver with parameters from URDF
-  solver_ = std::make_unique<KinematicSolver>(solver_params_);
+  solver_ = std::make_unique<KinematicSolver>(wheels_, icr_offset_x_);
 
   RCLCPP_INFO(rclcpp::get_logger("Sim2DHardwareInterface"), "Activation successful.");
   return hardware_interface::CallbackReturn::SUCCESS;
@@ -181,10 +181,8 @@ hardware_interface::return_type Sim2DHardwareInterface::write(
   }
 
   // Get chassis velocity from the kinematic solver
-  auto chassis_velocity = solver_->solve(wheel_speeds, steering_angles);
-  double vx = chassis_velocity.vx;
-  double vy = chassis_velocity.vy;
-  double omega = chassis_velocity.omega;
+  double vx = 0.0, vy = 0.0, omega = 0.0;
+  solver_->solve(wheel_speeds, steering_angles, vx, vy, omega);
 
   // Integrate the robot's pose
   double dt = period.seconds();
@@ -216,7 +214,7 @@ hardware_interface::return_type Sim2DHardwareInterface::write(
   geometry_msgs::msg::TransformStamped transform;
   transform.header.stamp = now;
   transform.header.frame_id = "odom";
-  transform.child_frame_id = solver_params_.base_frame_id;
+  transform.child_frame_id = base_frame_id_;
   transform.transform.translation.x = x_;
   transform.transform.translation.y = y_;
   transform.transform.translation.z = 0.0;
@@ -230,7 +228,7 @@ hardware_interface::return_type Sim2DHardwareInterface::write(
   nav_msgs::msg::Odometry odom_msg;
   odom_msg.header.stamp = now;
   odom_msg.header.frame_id = "odom";
-  odom_msg.child_frame_id = solver_params_.base_frame_id;
+  odom_msg.child_frame_id = base_frame_id_;
   odom_msg.pose.pose.position.x = x_;
   odom_msg.pose.pose.position.y = y_;
   odom_msg.pose.pose.position.z = 0.0;

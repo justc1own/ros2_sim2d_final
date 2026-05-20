@@ -1,17 +1,19 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>sim2d_hardware_interface</name>
+  <name>ros2_sim2d</name>
   <version>0.1.0</version>
   <description>ROS2 hardware interface package for a 2D simulator using ros2_control.</description>
-  <maintainer email="you@example.com">Your Name</maintainer>
+  <maintainer email="aitsyganok@edu.hse.ru">Andrey Tsyganok</maintainer> 
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <depend>rclcpp</depend>
-  <depend>rclcpp_lifecycle</depend>
   <depend>hardware_interface</depend>
+  <depend>rclcpp_lifecycle</depend>
   <depend>pluginlib</depend>
   <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>nav_msgs</depend>
   <depend>Eigen3</depend>
 
   <test_depend>ament_lint_auto</test_depend>

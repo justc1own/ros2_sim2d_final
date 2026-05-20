@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     git \
     ros-jazzy-ros2-control \
+    ros-jazzy-rclcpp-lifecycle \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/bash dev
