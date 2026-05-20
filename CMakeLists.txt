@@ -27,6 +27,14 @@ ament_target_dependencies(sim2d_hardware_interface
   Eigen3
 )
 
+# --- Test executable for KinematicSolver ---
+add_executable(test_kinematics_solver src/kinematics_solver.cpp)
+target_include_directories(test_kinematics_solver PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+)
+target_link_libraries(test_kinematics_solver PRIVATE Eigen3::Eigen)
+# --- End of test executable ---
+
 pluginlib_export_plugin_description_file(hardware_interface sim_2d_control.xml)
 
 ament_export_libraries(sim2d_hardware_interface)
