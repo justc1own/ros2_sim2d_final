@@ -64,7 +64,7 @@
     <ros2_control name="Sim2DSystem" type="system">
         <hardware>
             <!-- Our plugin -->
-            <plugin>sim2d_hardware_interface/Sim2DHardwareInterface</plugin>
+            <plugin>sim2d_hardware_interface::Sim2DHardwareInterface</plugin>
             <!-- Global simulator parameters -->
             <param name="x_icr">${x_icr}</param>
         </hardware>

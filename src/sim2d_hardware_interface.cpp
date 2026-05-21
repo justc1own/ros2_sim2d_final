@@ -104,6 +104,11 @@ std::vector<hardware_interface::CommandInterface> Sim2DHardwareInterface::export
   std::vector<hardware_interface::CommandInterface> command_interfaces;
   for (size_t i = 0; i < info_.joints.size(); i++)
   {
+    // Not all joints might have command interfaces (e.g. passive wheels).
+    if (info_.joints[i].command_interfaces.empty()) {
+        continue;
+    }
+    
     // Check if the joint is for steering (position) or driving (velocity)
     if (info_.joints[i].command_interfaces[0].name == hardware_interface::HW_IF_POSITION)
     {
@@ -173,6 +178,9 @@ hardware_interface::return_type Sim2DHardwareInterface::write(
   std::vector<double> wheel_speeds;
   std::vector<double> steering_angles;
   for (size_t i = 0; i < info_.joints.size(); ++i) {
+      if (info_.joints[i].command_interfaces.empty()) {
+          continue; // passive wheel
+      }
       if (info_.joints[i].command_interfaces[0].name == hardware_interface::HW_IF_VELOCITY) {
           wheel_speeds.push_back(hw_commands_velocities_[i]);
       } else if (info_.joints[i].command_interfaces[0].name == hardware_interface::HW_IF_POSITION) {
@@ -196,7 +204,10 @@ hardware_interface::return_type Sim2DHardwareInterface::write(
 
   // Update joint positions for visualization in RViz
   for (size_t i = 0; i < info_.joints.size(); ++i) {
-      if (info_.joints[i].command_interfaces[0].name == hardware_interface::HW_IF_VELOCITY) {
+      if (info_.joints[i].command_interfaces.empty()) {
+          // Uncontrolled wheels just follow chassis implicitly (or leave state as is)
+          hw_states_positions_[i] += 0.0;
+      } else if (info_.joints[i].command_interfaces[0].name == hardware_interface::HW_IF_VELOCITY) {
           // For driving wheels, integrate position from velocity
           hw_states_positions_[i] += hw_commands_velocities_[i] * dt;
       } else if (info_.joints[i].command_interfaces[0].name == hardware_interface::HW_IF_POSITION) {

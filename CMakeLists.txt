@@ -43,6 +43,12 @@ target_link_libraries(test_kinematics_solver PRIVATE Eigen3::Eigen sim2d_hardwar
 
 pluginlib_export_plugin_description_file(hardware_interface sim_2d_control.xml)
 
+install(TARGETS sim2d_hardware_interface test_kinematics_solver
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
+)
+
 install(
   DIRECTORY config launch urdf
   DESTINATION share/${PROJECT_NAME}
